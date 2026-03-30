@@ -1,16 +1,16 @@
-"""PEP-249 DBAPI 2.0 driver for the Pathling FHIR server.
+"""PEP-249 DBAPI 2.0 driver for SQL on FHIR servers.
 
 Usage::
 
-    import pathling.dbapi
-    conn = pathling.dbapi.connect(host="localhost", port=8080)
+    import sqlonfhir.dbapi
+    conn = sqlonfhir.dbapi.connect(host="localhost", port=8080)
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM patients LIMIT 10")
     rows = cursor.fetchall()
 """
 
-from pathling.dbapi.connection import Connection
-from pathling.dbapi.exceptions import (
+from sqlonfhir.dbapi.connection import Connection
+from sqlonfhir.dbapi.exceptions import (
     DatabaseError,
     DataError,
     Error,
@@ -21,7 +21,7 @@ from pathling.dbapi.exceptions import (
     OperationalError,
     ProgrammingError,
 )
-from pathling.dbapi.types import BINARY, BOOLEAN, DATETIME, NUMBER, ROWID, STRING
+from sqlonfhir.dbapi.types import BINARY, BOOLEAN, DATETIME, NUMBER, ROWID, STRING
 
 # PEP-249 module-level attributes
 apilevel = "2.0"
@@ -41,7 +41,7 @@ def connect(
     timeout: int = 300,
     verify_ssl: bool = True,
 ) -> Connection:
-    """Create a new DBAPI connection to a Pathling FHIR server."""
+    """Create a new DBAPI connection to a SQL on FHIR server."""
     return Connection(
         host=host,
         port=port,

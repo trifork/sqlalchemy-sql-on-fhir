@@ -1,12 +1,12 @@
-# sqlalchemy-fhir-pathling
+# sqlalchemy-sql-on-fhir
 
 SQLAlchemy dialect and Apache Superset engine spec for querying FHIR data via the
-[Pathling](https://pathling.csiro.au/) server's `$sqlquery-run` operation.
+[SQL on FHIR](https://build.fhir.org/ig/FHIR/sql-on-fhir-v2/) `$sqlquery-run` operation.
 
 ## Installation
 
 ```bash
-pip install sqlalchemy-fhir-pathling
+pip install sqlalchemy-sql-on-fhir
 ```
 
 ## Usage
@@ -16,7 +16,7 @@ pip install sqlalchemy-fhir-pathling
 ```python
 from sqlalchemy import create_engine, text
 
-engine = create_engine("pathling://localhost:8080/fhir")
+engine = create_engine("sqlonfhir://localhost:8080/fhir")
 with engine.connect() as conn:
     result = conn.execute(text("SELECT * FROM patients LIMIT 10"))
     for row in result:
@@ -25,19 +25,19 @@ with engine.connect() as conn:
 
 ### Apache Superset
 
-After installing the package, restart Superset. The "FHIR Pathling" database type
+After installing the package, restart Superset. The "SQL on FHIR" database type
 will appear in the database connection dialog. Use a connection string like:
 
 ```
-pathling://your-pathling-server:8080/fhir
+sqlonfhir://your-fhir-server:8080/fhir
 ```
 
-Tables in Superset correspond to ViewDefinitions registered on the Pathling server.
+Tables in Superset correspond to ViewDefinitions registered on the server.
 
 ### Standalone DBAPI
 
 ```python
-from pathling.dbapi import connect
+from sqlonfhir.dbapi import connect
 
 conn = connect(host="localhost", port=8080)
 cursor = conn.cursor()

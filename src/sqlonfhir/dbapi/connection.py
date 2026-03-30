@@ -1,4 +1,4 @@
-"""DBAPI 2.0 Connection for the Pathling FHIR server."""
+"""DBAPI 2.0 Connection for SQL on FHIR servers."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from typing import Any
 
 import requests
 
-from pathling.dbapi.cursor import Cursor
-from pathling.dbapi.exceptions import InterfaceError, OperationalError
+from sqlonfhir.dbapi.cursor import Cursor
+from sqlonfhir.dbapi.exceptions import InterfaceError, OperationalError
 
 
 class Connection:

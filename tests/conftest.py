@@ -1,4 +1,4 @@
-"""Shared test fixtures for the Pathling DBAPI/dialect tests."""
+"""Shared test fixtures for the SQL on FHIR DBAPI/dialect tests."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import pathling.dbapi
-from pathling.dbapi.connection import Connection
+import sqlonfhir.dbapi
+from sqlonfhir.dbapi.connection import Connection
 
 
 # Sample ViewDefinition Bundle returned by GET /fhir/ViewDefinition
@@ -94,7 +94,7 @@ def _make_mock_response(
 @pytest.fixture()
 def mock_session():
     """Provide a mock requests.Session that returns ViewDefinition bundle and query results."""
-    with patch("pathling.dbapi.connection.requests.Session") as mock_cls:
+    with patch("sqlonfhir.dbapi.connection.requests.Session") as mock_cls:
         session = MagicMock()
         mock_cls.return_value = session
 
@@ -118,4 +118,4 @@ def mock_session():
 @pytest.fixture()
 def connection(mock_session) -> Connection:
     """Provide a Connection with mocked HTTP."""
-    return pathling.dbapi.connect(host="localhost", port=8080)
+    return sqlonfhir.dbapi.connect(host="localhost", port=8080)

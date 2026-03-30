@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "sqlalchemy-fhir-pathling"
+name = "sqlalchemy-sql-on-fhir"
 version = "0.1.0"
-description = "SQLAlchemy dialect and Superset engine spec for FHIR Pathling server"
+description = "SQLAlchemy dialect and Superset engine spec for SQL on FHIR servers"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.9"
@@ -26,10 +26,10 @@ dev = [
 ]
 
 [project.entry-points."sqlalchemy.dialects"]
-pathling = "pathling.sqlalchemy.dialect:PathlingDialect"
+sqlonfhir = "sqlonfhir.sqlalchemy.dialect:SqlOnFhirDialect"
 
 [project.entry-points."superset.db_engine_specs"]
-pathling = "pathling.superset.engine_spec:PathlingEngineSpec"
+sqlonfhir = "sqlonfhir.superset.engine_spec:SqlOnFhirEngineSpec"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pathling"]
+packages = ["src/sqlonfhir"]

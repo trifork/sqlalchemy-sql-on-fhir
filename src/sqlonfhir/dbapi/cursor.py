@@ -1,4 +1,4 @@
-"""DBAPI 2.0 Cursor for the Pathling FHIR server.
+"""DBAPI 2.0 Cursor for SQL on FHIR servers.
 
 Translates SQL queries into FHIR $sqlquery-run HTTP POST requests,
 mapping table names to ViewDefinition references.
@@ -14,16 +14,16 @@ import requests
 import sqlglot
 from sqlglot import exp
 
-from pathling.dbapi.exceptions import (
+from sqlonfhir.dbapi.exceptions import (
     DatabaseError,
     InterfaceError,
     OperationalError,
     ProgrammingError,
 )
-from pathling.dbapi.types import FHIR_TYPE_TO_DBAPI, STRING, infer_type_from_value
+from sqlonfhir.dbapi.types import FHIR_TYPE_TO_DBAPI, STRING, infer_type_from_value
 
 if TYPE_CHECKING:
-    from pathling.dbapi.connection import Connection
+    from sqlonfhir.dbapi.connection import Connection
 
 
 class Cursor:

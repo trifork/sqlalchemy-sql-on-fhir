@@ -1,4 +1,4 @@
-"""Tests for the Pathling DBAPI Connection."""
+"""Tests for the SQL on FHIR DBAPI Connection."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import pathling.dbapi
-from pathling.dbapi.connection import Connection
-from pathling.dbapi.exceptions import InterfaceError, OperationalError
+import sqlonfhir.dbapi
+from sqlonfhir.dbapi.connection import Connection
+from sqlonfhir.dbapi.exceptions import InterfaceError, OperationalError
 from tests.conftest import SAMPLE_VIEW_DEFINITION_BUNDLE, _make_mock_response
 
 
@@ -57,14 +57,14 @@ def test_connection_rollback_noop(connection: Connection):
 
 def test_connection_auth_token():
     """Bearer token is set in session headers."""
-    with patch("pathling.dbapi.connection.requests.Session") as mock_cls:
+    with patch("sqlonfhir.dbapi.connection.requests.Session") as mock_cls:
         session = MagicMock()
         mock_cls.return_value = session
         session.get.return_value = _make_mock_response(
             json_data={"resourceType": "Bundle", "entry": []},
         )
 
-        conn = pathling.dbapi.connect(host="localhost", token="my-secret-token")
+        conn = sqlonfhir.dbapi.connect(host="localhost", token="my-secret-token")
         assert session.headers.__setitem__.call_args_list[0] == (
             ("Accept", "application/fhir+json"),
         )
@@ -80,14 +80,14 @@ def test_connection_auth_token():
 
 def test_connection_auth_basic():
     """Basic auth is set on the session."""
-    with patch("pathling.dbapi.connection.requests.Session") as mock_cls:
+    with patch("sqlonfhir.dbapi.connection.requests.Session") as mock_cls:
         session = MagicMock()
         mock_cls.return_value = session
         session.get.return_value = _make_mock_response(
             json_data={"resourceType": "Bundle", "entry": []},
         )
 
-        conn = pathling.dbapi.connect(
+        conn = sqlonfhir.dbapi.connect(
             host="localhost", username="user", password="pass"
         )
         assert session.auth == ("user", "pass")
@@ -95,7 +95,7 @@ def test_connection_auth_basic():
 
 def test_connection_error_on_failed_vd_fetch():
     """OperationalError raised when ViewDefinition fetch fails."""
-    with patch("pathling.dbapi.connection.requests.Session") as mock_cls:
+    with patch("sqlonfhir.dbapi.connection.requests.Session") as mock_cls:
         session = MagicMock()
         mock_cls.return_value = session
         resp = MagicMock()
@@ -108,7 +108,7 @@ def test_connection_error_on_failed_vd_fetch():
 
         resp.raise_for_status.side_effect = requests.exceptions.HTTPError("500")
         with pytest.raises(OperationalError, match="Failed to fetch"):
-            pathling.dbapi.connect(host="localhost")
+            sqlonfhir.dbapi.connect(host="localhost")
 
 
 def test_connection_pagination():
@@ -147,7 +147,7 @@ def test_connection_pagination():
         "link": [{"relation": "self", "url": "http://localhost:8080/fhir/ViewDefinition?page=2"}],
     }
 
-    with patch("pathling.dbapi.connection.requests.Session") as mock_cls:
+    with patch("sqlonfhir.dbapi.connection.requests.Session") as mock_cls:
         session = MagicMock()
         mock_cls.return_value = session
 
@@ -156,7 +156,7 @@ def test_connection_pagination():
             _make_mock_response(json_data=page2),
         ]
 
-        conn = pathling.dbapi.connect(host="localhost")
+        conn = sqlonfhir.dbapi.connect(host="localhost")
         assert "table1" in conn._view_definitions
         assert "table2" in conn._view_definitions
         assert session.get.call_count == 2

@@ -1,4 +1,4 @@
-"""Tests for the Pathling DBAPI Cursor."""
+"""Tests for the SQL on FHIR DBAPI Cursor."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pathling.dbapi.connection import Connection
-from pathling.dbapi.cursor import Cursor
-from pathling.dbapi.exceptions import InterfaceError, OperationalError, ProgrammingError
+from sqlonfhir.dbapi.connection import Connection
+from sqlonfhir.dbapi.cursor import Cursor
+from sqlonfhir.dbapi.exceptions import InterfaceError, OperationalError, ProgrammingError
 from tests.conftest import (
     SAMPLE_NDJSON_RESPONSE,
     SAMPLE_QUERY_RESPONSE,

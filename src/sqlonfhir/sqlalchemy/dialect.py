@@ -1,9 +1,9 @@
-"""SQLAlchemy dialect for the Pathling FHIR server.
+"""SQLAlchemy dialect for SQL-on-FHIR servers.
 
-Registers as the 'pathling' dialect, enabling::
+Registers as the 'sqlonfhir' dialect, enabling::
 
     from sqlalchemy import create_engine
-    engine = create_engine("pathling://localhost:8080/fhir")
+    engine = create_engine("sqlonfhir://localhost:8080/fhir")
 """
 
 from __future__ import annotations
@@ -40,10 +40,10 @@ def _fhir_type_to_sqla(fhir_type: str) -> sqla_types.TypeEngine:
     return _FHIR_TO_SQLA.get(fhir_type, sqla_types.String())
 
 
-class PathlingDialect(default.DefaultDialect):
-    """SQLAlchemy dialect for the Pathling FHIR server."""
+class SqlOnFhirDialect(default.DefaultDialect):
+    """SQLAlchemy dialect for SQL on FHIR servers."""
 
-    name = "pathling"
+    name = "sqlonfhir"
     driver = "rest"
 
     supports_alter = False
@@ -57,21 +57,21 @@ class PathlingDialect(default.DefaultDialect):
 
     @classmethod
     def dbapi(cls) -> Any:
-        import pathling.dbapi
+        import sqlonfhir.dbapi
 
-        return pathling.dbapi
+        return sqlonfhir.dbapi
 
     @classmethod
     def import_dbapi(cls) -> Any:
-        import pathling.dbapi
+        import sqlonfhir.dbapi
 
-        return pathling.dbapi
+        return sqlonfhir.dbapi
 
     def create_connect_args(self, url: Any) -> tuple[list[Any], dict[str, Any]]:
         """Translate a SQLAlchemy URL into DBAPI connect() kwargs.
 
-        URL format: pathling://[user:password@]host[:port]/path
-        Example:    pathling://localhost:8080/fhir
+        URL format: sqlonfhir://[user:password@]host[:port]/path
+        Example:    sqlonfhir://localhost:8080/fhir
         """
         kwargs: dict[str, Any] = {
             "host": url.host or "localhost",

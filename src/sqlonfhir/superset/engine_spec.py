@@ -1,4 +1,4 @@
-"""Apache Superset engine spec for the Pathling FHIR server.
+"""Apache Superset engine spec for SQL on FHIR servers.
 
 Auto-discovered by Superset via the 'superset.db_engine_specs' entry point.
 """
@@ -10,16 +10,16 @@ from typing import Any
 from superset.db_engine_specs.base import BaseEngineSpec
 
 
-class PathlingEngineSpec(BaseEngineSpec):
-    """Engine spec for querying FHIR data via Pathling's $sqlquery-run operation."""
+class SqlOnFhirEngineSpec(BaseEngineSpec):
+    """Engine spec for querying FHIR data via $sqlquery-run operation."""
 
-    engine = "pathling"
-    engine_name = "FHIR Pathling"
+    engine = "sqlonfhir"
+    engine_name = "SQL on FHIR"
     engine_aliases: set[str] = set()
-    drivers = {"rest": "Pathling REST API"}
+    drivers = {"rest": "SQL on FHIR REST API"}
     default_driver = "rest"
 
-    sqlalchemy_uri_placeholder = "pathling://host:port/fhir"
+    sqlalchemy_uri_placeholder = "sqlonfhir://host:port/fhir"
 
     # Capabilities
     allows_joins = True
@@ -37,7 +37,7 @@ class PathlingEngineSpec(BaseEngineSpec):
 
     @classmethod
     def get_dbapi_exception_mapping(cls) -> dict[type[Exception], type[Exception]]:
-        from pathling.dbapi.exceptions import (
+        from sqlonfhir.dbapi.exceptions import (
             DatabaseError,
             OperationalError,
             ProgrammingError,

@@ -2,3 +2,6 @@ src/pathling/__pycache__
 src/pathling/dbapi/__pycache__
 src/pathling/sqlalchemy/__pycache__
 tests/__pycache__
+src/sqlonfhir/dbapi/__pycache__
+src/sqlonfhir/__pycache__
+src/sqlonfhir/sqlalchemy/__pycache__
