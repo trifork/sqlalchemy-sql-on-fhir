@@ -38,6 +38,7 @@ class Cursor:
         self._row_index = 0
         self.description: list[tuple[Any, ...]] | None = None
         self.rowcount: int = -1
+        self._last_operation: str | None = None
 
     def execute(self, operation: str, parameters: dict[str, Any] | None = None) -> None:
         """Execute a SQL query via the Pathling $sqlquery-run operation.
@@ -53,6 +54,21 @@ class Cursor:
         self.description = None
         self.rowcount = -1
 
+        # Transpile to Spark SQL so that Pathling's Spark engine accepts the query.
+        # This converts ANSI double-quoted identifiers (e.g. "col") to backtick-quoted
+        # identifiers (e.g. `col`) and normalises other dialect differences.
+        # Also strips schema prefixes (e.g. `default`.table -> table) since Pathling
+        # has no schema concept — the dialect returns "default" only for SQL Lab UX.
+        try:
+            tree = sqlglot.parse_one(operation, dialect="spark")
+            for table in tree.find_all(exp.Table):
+                if table.args.get("db"):
+                    table.set("db", None)
+            operation = tree.sql(dialect="spark")
+        except sqlglot.errors.ParseError:
+            pass  # Send original SQL and let the server report the error
+
+        self._last_operation = operation
         table_names = self._extract_table_names(operation)
         related_artifacts = self._build_related_artifacts(table_names)
         fhir_params = self._build_fhir_parameters(operation, related_artifacts, parameters)
@@ -137,6 +153,36 @@ class Cursor:
         return row
 
     # -- Internal methods --
+
+    def _extract_projected_columns(self, sql: str) -> list[str] | None:
+        """Return the column aliases from the outermost SELECT, or None if unparseable.
+
+        Pathling omits null fields from JSON responses, so the result set may
+        contain fewer columns than the SQL projects. This method lets us fill
+        the gaps with None so the cursor description is complete.
+        """
+        try:
+            statements = sqlglot.parse(sql, dialect="spark")
+            if not statements:
+                return None
+            stmt = statements[0]
+            if not isinstance(stmt, exp.Select):
+                return None
+            cols: list[str] = []
+            for sel in stmt.selects:
+                if isinstance(sel, exp.Star):
+                    return None  # SELECT * — can't enumerate statically
+                alias = sel.alias
+                if alias:
+                    cols.append(alias)
+                elif isinstance(sel, exp.Column):
+                    cols.append(sel.name)
+                else:
+                    # Expression without alias — use the SQL text as the name
+                    cols.append(sel.sql(dialect="spark"))
+            return cols if cols else None
+        except sqlglot.errors.ParseError:
+            return None
 
     def _extract_table_names(self, sql: str) -> set[str]:
         """Extract table names from SQL using sqlglot AST parsing."""
@@ -284,8 +330,18 @@ class Cursor:
             self.description = []
             return
 
-        # Extract column names from first row
-        col_names = list(rows_data[0].keys())
+        # Pathling omits null fields from JSON, so derive the authoritative column
+        # list from the SQL when possible, falling back to the response keys.
+        response_keys = list(rows_data[0].keys())
+        projected = (
+            self._extract_projected_columns(self._last_operation)
+            if self._last_operation
+            else None
+        )
+        if projected and len(projected) >= len(response_keys):
+            col_names = projected
+        else:
+            col_names = response_keys
 
         # Build description from column names and infer types from values
         self.description = []
@@ -298,7 +354,7 @@ class Cursor:
                 (col_name, type_code, None, None, None, None, True)
             )
 
-        # Convert rows to tuples
+        # Convert rows to tuples (None for columns Pathling omitted)
         self._rows = [
             tuple(row.get(col) for col in col_names) for row in rows_data
         ]
@@ -316,7 +372,18 @@ class Cursor:
 
         rows_data = [json.loads(line) for line in lines]
 
-        col_names = list(rows_data[0].keys())
+        response_keys = list(rows_data[0].keys())
+        projected = (
+            self._extract_projected_columns(self._last_operation)
+            if self._last_operation
+            else None
+        )
+        col_names = (
+            projected
+            if projected and len(projected) >= len(response_keys)
+            else response_keys
+        )
+
         self.description = []
         for col_name in col_names:
             first_val = rows_data[0].get(col_name)

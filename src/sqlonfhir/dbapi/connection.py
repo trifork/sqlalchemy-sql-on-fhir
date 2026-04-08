@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import requests
 
 from sqlonfhir.dbapi.cursor import Cursor
 from sqlonfhir.dbapi.exceptions import InterfaceError, OperationalError
+
+# Module-level cache: base_url -> {"data": view_defs, "fetched_at": timestamp}
+# Shared across all connections to the same server so a dashboard loading many
+# charts simultaneously doesn't cause a thundering herd of ViewDefinition requests.
+_VIEW_DEF_CACHE: dict[str, dict[str, Any]] = {}
+_CACHE_TTL_SECONDS = 300  # 5 minutes
 
 
 class Connection:
@@ -47,28 +54,61 @@ class Connection:
         if headers:
             self._session.headers.update(headers)
 
-        # Cache: ViewDefinition name -> {id, columns, resource_type}
+        # ViewDefinitions are shared from the module-level cache when available.
         self._view_definitions: dict[str, dict[str, Any]] = {}
         self._load_view_definitions()
 
+    @property
+    def _view_definitions(self) -> dict[str, dict[str, Any]]:
+        cached = _VIEW_DEF_CACHE.get(self.base_url)
+        if cached:
+            return cached["data"]
+        return {}
+
+    @_view_definitions.setter
+    def _view_definitions(self, value: dict[str, dict[str, Any]]) -> None:
+        if value:
+            _VIEW_DEF_CACHE[self.base_url] = {"data": value, "fetched_at": time.monotonic()}
+
     def _load_view_definitions(self) -> None:
-        """Fetch all ViewDefinitions from the server and build the name->metadata cache."""
-        self._view_definitions = {}
-        url = f"{self.base_url}/ViewDefinition"
+        """Fetch all ViewDefinitions from the server, using a module-level cache.
+
+        Skips the network fetch if a valid cached result exists. Retries up to
+        3 times with exponential backoff on transient 5xx errors.
+        """
+        cached = _VIEW_DEF_CACHE.get(self.base_url)
+        if cached and (time.monotonic() - cached["fetched_at"]) < _CACHE_TTL_SECONDS:
+            return  # Cache is still fresh
+
+        view_defs: dict[str, dict[str, Any]] = {}
+        url: str | None = f"{self.base_url}/ViewDefinition"
         params: dict[str, str] = {"_count": "500"}
+        max_retries = 3
 
         while url:
-            try:
-                resp = self._session.get(url, params=params, timeout=self.timeout)
-                resp.raise_for_status()
-            except requests.exceptions.ConnectionError as e:
+            last_exc: Exception | None = None
+            for attempt in range(max_retries):
+                try:
+                    resp = self._session.get(url, params=params, timeout=self.timeout)
+                    resp.raise_for_status()
+                    last_exc = None
+                    break
+                except requests.exceptions.ConnectionError as e:
+                    raise OperationalError(
+                        f"Failed to connect to Pathling server at {self.base_url}: {e}"
+                    ) from e
+                except requests.exceptions.HTTPError as e:
+                    last_exc = e
+                    if resp.status_code < 500 or attempt == max_retries - 1:
+                        raise OperationalError(
+                            f"Failed to fetch ViewDefinitions: {e}"
+                        ) from e
+                    time.sleep(2 ** attempt)  # 1s, 2s backoff
+
+            if last_exc:
                 raise OperationalError(
-                    f"Failed to connect to Pathling server at {self.base_url}: {e}"
-                ) from e
-            except requests.exceptions.HTTPError as e:
-                raise OperationalError(
-                    f"Failed to fetch ViewDefinitions: {e}"
-                ) from e
+                    f"Failed to fetch ViewDefinitions after {max_retries} attempts: {last_exc}"
+                ) from last_exc
 
             bundle = resp.json()
             for entry in bundle.get("entry", []):
@@ -81,7 +121,7 @@ class Connection:
                 columns = self._extract_columns(resource)
                 resource_type = resource.get("resource", "")
 
-                self._view_definitions[name] = {
+                view_defs[name] = {
                     "id": vid,
                     "columns": columns,
                     "resource_type": resource_type,
@@ -95,6 +135,8 @@ class Connection:
                     url = link.get("url")
                     break
 
+        _VIEW_DEF_CACHE[self.base_url] = {"data": view_defs, "fetched_at": time.monotonic()}
+
     def _extract_columns(self, view_definition: dict[str, Any]) -> list[dict[str, str]]:
         """Extract column metadata from a ViewDefinition resource."""
         columns: list[dict[str, str]] = []
@@ -107,7 +149,8 @@ class Connection:
         return columns
 
     def refresh_view_definitions(self) -> None:
-        """Re-fetch ViewDefinitions from the server."""
+        """Invalidate the cache and re-fetch ViewDefinitions from the server."""
+        _VIEW_DEF_CACHE.pop(self.base_url, None)
         self._load_view_definitions()
 
     def cursor(self) -> Cursor:

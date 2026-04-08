@@ -12,6 +12,14 @@ from typing import Any
 
 from sqlalchemy import types as sqla_types
 from sqlalchemy.engine import default
+from sqlalchemy.sql.compiler import IdentifierPreparer
+
+
+class _SparkIdentifierPreparer(IdentifierPreparer):
+    """Use backtick quoting so generated SQL is valid Spark SQL."""
+
+    def __init__(self, dialect: Any) -> None:
+        super().__init__(dialect, initial_quote="`", final_quote="`")
 
 
 # FHIR type string -> SQLAlchemy type
@@ -45,6 +53,7 @@ class SqlOnFhirDialect(default.DefaultDialect):
 
     name = "sqlonfhir"
     driver = "rest"
+    preparer = _SparkIdentifierPreparer
 
     supports_alter = False
     supports_default_values = False
