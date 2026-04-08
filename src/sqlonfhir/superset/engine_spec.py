@@ -55,6 +55,25 @@ class SqlOnFhirEngineSpec(BaseEngineSpec):
         }
 
     @classmethod
+    def get_datatype(cls, type_code: Any) -> str | None:
+        """Map DBAPI type objects to Superset-recognised type strings."""
+        from sqlonfhir.dbapi.types import BINARY, BOOLEAN, DATETIME, NUMBER, STRING
+
+        if type_code is STRING:
+            return "VARCHAR"
+        if type_code is NUMBER:
+            return "DOUBLE"
+        if type_code is DATETIME:
+            return "TIMESTAMP"
+        if type_code is BOOLEAN:
+            return "BOOLEAN"
+        if type_code is BINARY:
+            return "BLOB"
+        if isinstance(type_code, str):
+            return type_code.upper()
+        return None
+
+    @classmethod
     def get_allow_cost_estimate(cls, extra: dict[str, Any]) -> bool:
         return False
 
