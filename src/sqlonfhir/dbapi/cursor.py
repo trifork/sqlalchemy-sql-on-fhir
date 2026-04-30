@@ -7,12 +7,38 @@ mapping table names to ViewDefinition references.
 from __future__ import annotations
 
 import base64
+import datetime as _dt
 import json
 from typing import TYPE_CHECKING, Any
 
 import requests
 import sqlglot
 from sqlglot import exp
+
+
+def _runtime_parameter_entry(name: str, value: Any) -> dict[str, Any]:
+    """Encode a Python parameter value as a FHIR Parameters.parameter entry.
+
+    Maps Python types to the corresponding FHIR primitive value[x] field.
+    """
+    if isinstance(value, bool):
+        return {"name": name, "valueBoolean": value}
+    if isinstance(value, int):
+        return {"name": name, "valueInteger": value}
+    if isinstance(value, float):
+        return {"name": name, "valueDecimal": value}
+    if isinstance(value, _dt.datetime):
+        return {"name": name, "valueDateTime": value.isoformat()}
+    if isinstance(value, _dt.date):
+        return {"name": name, "valueDate": value.isoformat()}
+    if isinstance(value, _dt.time):
+        return {"name": name, "valueTime": value.isoformat()}
+    if isinstance(value, (bytes, bytearray)):
+        return {
+            "name": name,
+            "valueBase64Binary": base64.b64encode(bytes(value)).decode("ascii"),
+        }
+    return {"name": name, "valueString": str(value)}
 
 from sqlonfhir.dbapi.exceptions import (
     DatabaseError,
@@ -237,7 +263,14 @@ class Cursor:
         library: dict[str, Any] = {
             "resourceType": "Library",
             "status": "active",
-            "type": {"coding": [{"code": "logic-library"}]},
+            "type": {
+                "coding": [
+                    {
+                        "system": "https://sql-on-fhir.org/ig/CodeSystem/LibraryTypesCodes",
+                        "code": "sql-query",
+                    }
+                ]
+            },
             "content": [
                 {
                     "contentType": "application/sql",
@@ -254,18 +287,22 @@ class Cursor:
             }
         ]
 
-        # Add query parameter bindings
+        # Runtime parameter bindings — wrapped in a single typed Parameters resource
+        # so that each value carries its FHIR type rather than being string-coerced.
         if parameters:
-            for param_name, param_value in parameters.items():
-                params_list.append(
-                    {
-                        "name": "parameter",
-                        "part": [
-                            {"name": "name", "valueString": param_name},
-                            {"name": "value", "valueString": str(param_value)},
-                        ],
-                    }
-                )
+            inner_params = [
+                _runtime_parameter_entry(name, value)
+                for name, value in parameters.items()
+            ]
+            params_list.append(
+                {
+                    "name": "parameters",
+                    "resource": {
+                        "resourceType": "Parameters",
+                        "parameter": inner_params,
+                    },
+                }
+            )
 
         return {
             "resourceType": "Parameters",
