@@ -18,7 +18,7 @@ _CACHE_TTL_SECONDS = 300  # 5 minutes
 
 
 class Connection:
-    """A DBAPI 2.0 connection to a Pathling FHIR server.
+    """A DBAPI 2.0 connection to a SQL-on-FHIR server.
 
     Manages the HTTP session, authentication, and a cache of ViewDefinition
     metadata used to map SQL table names to FHIR ViewDefinition resources.
@@ -33,6 +33,10 @@ class Connection:
         token: str | None = None,
         username: str | None = None,
         password: str | None = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
+        token_url: str | None = None,
+        scope: str | None = None,
         headers: dict[str, str] | None = None,
         timeout: int = 300,
         verify_ssl: bool = True,
@@ -41,11 +45,19 @@ class Connection:
         self.timeout = timeout
         self._closed = False
 
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._token_url = token_url
+        self._scope = scope
+        self._token_expires_at: float | None = None
+
         self._session = requests.Session()
         self._session.verify = verify_ssl
         self._session.headers["Accept"] = "application/fhir+json"
 
-        if token:
+        if self._uses_oauth:
+            self._fetch_token()
+        elif token:
             bearer = token if token.startswith("Bearer ") else f"Bearer {token}"
             self._session.headers["Authorization"] = bearer
         elif username and password:
@@ -57,6 +69,64 @@ class Connection:
         # ViewDefinitions are shared from the module-level cache when available.
         self._view_definitions: dict[str, dict[str, Any]] = {}
         self._load_view_definitions()
+
+    @property
+    def _uses_oauth(self) -> bool:
+        return bool(self._token_url and self._client_id and self._client_secret)
+
+    def _fetch_token(self) -> None:
+        """Fetch a fresh access token from the OAuth2 token endpoint."""
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": self._client_id,
+            "client_secret": self._client_secret,
+        }
+        if self._scope:
+            data["scope"] = self._scope
+        try:
+            resp = requests.post(
+                self._token_url,
+                data=data,
+                timeout=self.timeout,
+                verify=self._session.verify,
+            )
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            raise OperationalError(
+                f"Failed to fetch OAuth2 token from {self._token_url}: {e}"
+            ) from e
+
+        body = resp.json()
+        access_token = body.get("access_token")
+        if not access_token:
+            raise OperationalError(
+                f"Token endpoint response missing 'access_token': {body}"
+            )
+
+        # Refresh slightly before actual expiry so an in-flight request never
+        # arrives with an already-expired token. Skew is 25% of lifetime,
+        # clamped to [5s, 30s] — fine for both 5-minute and 1-hour tokens.
+        expires_in = int(body.get("expires_in", 300))
+        skew = min(30, max(5, expires_in // 4))
+        self._session.headers["Authorization"] = f"Bearer {access_token}"
+        self._token_expires_at = time.monotonic() + expires_in - skew
+
+    def _ensure_token(self) -> None:
+        if not self._uses_oauth:
+            return
+        if self._token_expires_at is None or time.monotonic() >= self._token_expires_at:
+            self._fetch_token()
+
+    def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
+        """HTTP request with proactive token refresh and one 401 retry (OAuth2 mode)."""
+        kwargs.setdefault("timeout", self.timeout)
+        self._ensure_token()
+        send = getattr(self._session, method.lower())
+        resp = send(url, **kwargs)
+        if resp.status_code == 401 and self._uses_oauth:
+            self._fetch_token()
+            resp = send(url, **kwargs)
+        return resp
 
     @property
     def _view_definitions(self) -> dict[str, dict[str, Any]]:
@@ -89,13 +159,13 @@ class Connection:
             last_exc: Exception | None = None
             for attempt in range(max_retries):
                 try:
-                    resp = self._session.get(url, params=params, timeout=self.timeout)
+                    resp = self._request("GET", url, params=params)
                     resp.raise_for_status()
                     last_exc = None
                     break
                 except requests.exceptions.ConnectionError as e:
                     raise OperationalError(
-                        f"Failed to connect to Pathling server at {self.base_url}: {e}"
+                        f"Failed to connect to FHIR server at {self.base_url}: {e}"
                     ) from e
                 except requests.exceptions.HTTPError as e:
                     last_exc = e
@@ -165,10 +235,10 @@ class Connection:
             self._closed = True
 
     def commit(self) -> None:
-        """No-op. Pathling is read-only."""
+        """No-op. SQL-on-FHIR is read-only."""
 
     def rollback(self) -> None:
-        """No-op. Pathling is read-only."""
+        """No-op. SQL-on-FHIR is read-only."""
 
     def _check_closed(self) -> None:
         if self._closed:

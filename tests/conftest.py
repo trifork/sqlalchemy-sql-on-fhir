@@ -91,6 +91,19 @@ def _make_mock_response(
     return resp
 
 
+@pytest.fixture(autouse=True)
+def _clear_view_definition_cache():
+    """The Connection module caches ViewDefinition lookups by base_url at module
+    scope. Without clearing it between tests, later tests that mock a different
+    response see the cached one instead — making test outcomes order-dependent.
+    """
+    from sqlonfhir.dbapi.connection import _VIEW_DEF_CACHE
+
+    _VIEW_DEF_CACHE.clear()
+    yield
+    _VIEW_DEF_CACHE.clear()
+
+
 @pytest.fixture()
 def mock_session():
     """Provide a mock requests.Session that returns ViewDefinition bundle and query results."""

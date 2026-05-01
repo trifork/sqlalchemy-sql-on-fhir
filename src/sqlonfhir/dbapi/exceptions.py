@@ -1,8 +1,8 @@
-"""PEP-249 exception hierarchy for the Pathling DBAPI driver."""
+"""PEP-249 exception hierarchy for the SQL-on-FHIR DBAPI driver."""
 
 
 class Error(Exception):
-    """Base exception for the Pathling DBAPI driver."""
+    """Base exception for the SQL-on-FHIR DBAPI driver."""
 
 
 class InterfaceError(Error):

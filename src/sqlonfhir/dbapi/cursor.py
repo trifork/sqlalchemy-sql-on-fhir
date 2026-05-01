@@ -1,7 +1,7 @@
-"""DBAPI 2.0 Cursor for SQL on FHIR servers.
+"""DBAPI 2.0 Cursor for SQL-on-FHIR servers.
 
-Translates SQL queries into FHIR $sqlquery-run HTTP POST requests,
-mapping table names to ViewDefinition references.
+Translates SQL queries into FHIR `$sqlquery-run` HTTP POST requests, mapping
+table names to ViewDefinition references.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 
 class Cursor:
-    """A DBAPI 2.0 cursor that executes SQL via Pathling's $sqlquery-run operation."""
+    """A DBAPI 2.0 cursor that executes SQL via the `$sqlquery-run` operation."""
 
     arraysize: int = 100
 
@@ -41,7 +41,7 @@ class Cursor:
         self._last_operation: str | None = None
 
     def execute(self, operation: str, parameters: dict[str, Any] | None = None) -> None:
-        """Execute a SQL query via the Pathling $sqlquery-run operation.
+        """Execute a SQL query via the `$sqlquery-run` operation.
 
         1. Parse table names from the SQL using sqlglot.
         2. Map each table name to a ViewDefinition ID from the connection cache.
@@ -54,11 +54,12 @@ class Cursor:
         self.description = None
         self.rowcount = -1
 
-        # Transpile to Spark SQL so that Pathling's Spark engine accepts the query.
-        # This converts ANSI double-quoted identifiers (e.g. "col") to backtick-quoted
-        # identifiers (e.g. `col`) and normalises other dialect differences.
-        # Also strips schema prefixes (e.g. `default`.table -> table) since Pathling
-        # has no schema concept — the dialect returns "default" only for SQL Lab UX.
+        # Transpile to Spark SQL since some SQL-on-FHIR servers (e.g. Pathling)
+        # run Spark under the hood. Converts ANSI double-quoted identifiers
+        # (e.g. "col") to backtick-quoted (`col`) and normalises other dialect
+        # differences. Also strips schema prefixes (`default`.table -> table)
+        # since SQL-on-FHIR has no schema concept — the dialect returns
+        # "default" only for SQL Lab UX.
         try:
             tree = sqlglot.parse_one(operation, dialect="spark")
             for table in tree.find_all(exp.Table):
@@ -77,12 +78,12 @@ class Cursor:
         query_params = {"_format": "json"}
 
         try:
-            resp = self._connection._session.post(
+            resp = self._connection._request(
+                "POST",
                 url,
                 json=fhir_params,
                 params=query_params,
                 headers={"Content-Type": "application/fhir+json"},
-                timeout=self._connection.timeout,
             )
         except requests.exceptions.ConnectionError as e:
             raise OperationalError(f"Connection failed: {e}") from e
@@ -157,9 +158,10 @@ class Cursor:
     def _extract_projected_columns(self, sql: str) -> list[str] | None:
         """Return the column aliases from the outermost SELECT, or None if unparseable.
 
-        Pathling omits null fields from JSON responses, so the result set may
-        contain fewer columns than the SQL projects. This method lets us fill
-        the gaps with None so the cursor description is complete.
+        Some SQL-on-FHIR servers (e.g. Pathling) omit null fields from JSON
+        responses, so the result set may contain fewer columns than the SQL
+        projects. This method lets us fill the gaps with None so the cursor
+        description is complete.
         """
         try:
             statements = sqlglot.parse(sql, dialect="spark")
@@ -188,7 +190,8 @@ class Cursor:
         """Extract table names from SQL using sqlglot AST parsing."""
         table_names: set[str] = set()
         try:
-            # Use Spark dialect since Pathling uses Spark SQL under the hood
+            # Use Spark dialect for parsing — matches what servers like Pathling
+            # run under the hood, and is harmless for plain ANSI SQL.
             for statement in sqlglot.parse(sql, dialect="spark"):
                 if statement is None:
                     continue
@@ -330,8 +333,9 @@ class Cursor:
             self.description = []
             return
 
-        # Pathling omits null fields from JSON, so derive the authoritative column
-        # list from the SQL when possible, falling back to the response keys.
+        # Some servers (e.g. Pathling) omit null fields from JSON, so derive
+        # the authoritative column list from the SQL when possible, falling
+        # back to the response keys.
         response_keys = list(rows_data[0].keys())
         projected = (
             self._extract_projected_columns(self._last_operation)
@@ -354,7 +358,7 @@ class Cursor:
                 (col_name, type_code, None, None, None, None, True)
             )
 
-        # Convert rows to tuples (None for columns Pathling omitted)
+        # Convert rows to tuples (None for omitted columns)
         self._rows = [
             tuple(row.get(col) for col in col_names) for row in rows_data
         ]

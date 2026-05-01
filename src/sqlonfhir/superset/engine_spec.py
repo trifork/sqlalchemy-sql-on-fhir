@@ -30,7 +30,7 @@ class SqlOnFhirEngineSpec(BaseEngineSpec):
     supports_file_upload = False
     disable_ssh_tunneling = True
 
-    # Time grain expressions (Pathling uses Spark SQL syntax)
+    # Time grain expressions (Spark SQL syntax — used by e.g. Pathling)
     _time_grain_expressions: dict[str | None, str] = {
         None: "{col}",
     }

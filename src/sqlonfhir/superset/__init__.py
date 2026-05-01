@@ -1,1 +1,1 @@
-"""Superset engine spec for the Pathling FHIR server."""
+"""Superset engine spec for SQL-on-FHIR servers."""

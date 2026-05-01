@@ -1,1 +1,1 @@
-"""SQLAlchemy dialect for the Pathling FHIR server."""
+"""SQLAlchemy dialect for SQL-on-FHIR servers."""

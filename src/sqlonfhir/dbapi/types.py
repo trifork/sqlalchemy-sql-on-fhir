@@ -1,4 +1,4 @@
-"""FHIR type mappings for the Pathling DBAPI driver.
+"""FHIR type mappings for the SQL-on-FHIR DBAPI driver.
 
 Maps FHIR primitive types to Python types and DBAPI 2.0 type constants.
 """

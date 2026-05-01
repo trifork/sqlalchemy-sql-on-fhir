@@ -111,6 +111,133 @@ def test_connection_error_on_failed_vd_fetch():
             sqlonfhir.dbapi.connect(host="localhost")
 
 
+def test_connection_oauth_fetches_token_on_init():
+    """When client_credentials are provided, a token is fetched and applied as Bearer."""
+    with patch("sqlonfhir.dbapi.connection.requests.Session") as mock_cls, patch(
+        "sqlonfhir.dbapi.connection.requests.post"
+    ) as mock_post:
+        session = MagicMock()
+        mock_cls.return_value = session
+        session.get.return_value = _make_mock_response(
+            json_data={"resourceType": "Bundle", "entry": []},
+        )
+        mock_post.return_value = _make_mock_response(
+            json_data={"access_token": "fresh-jwt", "expires_in": 300, "token_type": "Bearer"},
+        )
+
+        sqlonfhir.dbapi.connect(
+            host="localhost",
+            client_id="cid",
+            client_secret="csec",
+            token_url="https://idp.example/token",
+            scope="system/*.rs",
+        )
+
+        # Token endpoint was hit with client_credentials grant
+        assert mock_post.call_count == 1
+        call = mock_post.call_args
+        assert call.args[0] == "https://idp.example/token"
+        assert call.kwargs["data"]["grant_type"] == "client_credentials"
+        assert call.kwargs["data"]["client_id"] == "cid"
+        assert call.kwargs["data"]["client_secret"] == "csec"
+        assert call.kwargs["data"]["scope"] == "system/*.rs"
+
+        # Bearer header was set on the session from the access_token
+        auth_calls = [
+            c for c in session.headers.__setitem__.call_args_list if c[0][0] == "Authorization"
+        ]
+        assert auth_calls[-1][0][1] == "Bearer fresh-jwt"
+
+
+def test_connection_oauth_refreshes_proactively_before_expiry():
+    """A second request after the token's lifetime should trigger a refresh."""
+    with patch("sqlonfhir.dbapi.connection.requests.Session") as mock_cls, patch(
+        "sqlonfhir.dbapi.connection.requests.post"
+    ) as mock_post, patch("sqlonfhir.dbapi.connection.time.monotonic") as mock_time:
+        session = MagicMock()
+        mock_cls.return_value = session
+        session.get.return_value = _make_mock_response(
+            json_data={"resourceType": "Bundle", "entry": []},
+        )
+        mock_post.side_effect = [
+            _make_mock_response(json_data={"access_token": "tok-1", "expires_in": 60}),
+            _make_mock_response(json_data={"access_token": "tok-2", "expires_in": 60}),
+        ]
+        mock_time.return_value = 1000.0
+
+        conn = sqlonfhir.dbapi.connect(
+            host="localhost",
+            client_id="cid",
+            client_secret="csec",
+            token_url="https://idp.example/token",
+        )
+        assert mock_post.call_count == 1
+
+        # Jump past the proactive-refresh threshold (60s lifetime - skew=15s = 1045)
+        mock_time.return_value = 1100.0
+        conn._request("GET", "http://localhost:8080/fhir/anything")
+        assert mock_post.call_count == 2
+
+        auth_calls = [
+            c for c in session.headers.__setitem__.call_args_list if c[0][0] == "Authorization"
+        ]
+        assert auth_calls[-1][0][1] == "Bearer tok-2"
+
+
+def test_connection_oauth_retries_on_401():
+    """A 401 from the FHIR server triggers a single token refresh + retry."""
+    with patch("sqlonfhir.dbapi.connection.requests.Session") as mock_cls, patch(
+        "sqlonfhir.dbapi.connection.requests.post"
+    ) as mock_post:
+        session = MagicMock()
+        mock_cls.return_value = session
+        session.get.return_value = _make_mock_response(
+            json_data={"resourceType": "Bundle", "entry": []},
+        )
+        mock_post.return_value = _make_mock_response(
+            json_data={"access_token": "tok", "expires_in": 3600},
+        )
+
+        conn = sqlonfhir.dbapi.connect(
+            host="localhost",
+            client_id="cid",
+            client_secret="csec",
+            token_url="https://idp.example/token",
+        )
+        # 1 token fetch happened during init
+        assert mock_post.call_count == 1
+
+        unauthorized = _make_mock_response(status_code=401, json_data={})
+        ok = _make_mock_response(status_code=200, json_data={})
+        session.post.side_effect = [unauthorized, ok]
+
+        resp = conn._request("POST", "http://localhost:8080/fhir/$something", json={})
+
+        # Token endpoint was called again to refresh after the 401
+        assert mock_post.call_count == 2
+        assert resp.status_code == 200
+        assert session.post.call_count == 2
+
+
+def test_connection_oauth_token_endpoint_failure_raises():
+    """Failure to reach the IdP surfaces as OperationalError."""
+    import requests as _requests
+
+    with patch("sqlonfhir.dbapi.connection.requests.Session") as mock_cls, patch(
+        "sqlonfhir.dbapi.connection.requests.post"
+    ) as mock_post:
+        mock_cls.return_value = MagicMock()
+        mock_post.side_effect = _requests.exceptions.ConnectionError("dns failure")
+
+        with pytest.raises(OperationalError, match="Failed to fetch OAuth2 token"):
+            sqlonfhir.dbapi.connect(
+                host="localhost",
+                client_id="cid",
+                client_secret="csec",
+                token_url="https://idp.example/token",
+            )
+
+
 def test_connection_pagination():
     """ViewDefinition loading follows pagination links."""
     page1 = {

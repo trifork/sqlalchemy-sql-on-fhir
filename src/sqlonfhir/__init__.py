@@ -1,3 +1,3 @@
-"""SQLAlchemy dialect for FHIR Pathling server's $sqlquery-run operation."""
+"""SQLAlchemy dialect and DBAPI driver for SQL-on-FHIR servers."""
 
 __version__ = "0.1.0"

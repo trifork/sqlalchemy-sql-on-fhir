@@ -42,6 +42,21 @@ def test_create_connect_args_https_on_443():
     assert kwargs["scheme"] == "https"
 
 
+def test_create_connect_args_with_oauth_params():
+    """OAuth2 client-credentials params come through from the URL query string."""
+    dialect = SqlOnFhirDialect()
+    url = make_url(
+        "sqlonfhir://myhost:443/fhir"
+        "?client_id=cid&client_secret=csec"
+        "&token_url=https://idp.example/token&scope=system/*.rs"
+    )
+    _, kwargs = dialect.create_connect_args(url)
+    assert kwargs["client_id"] == "cid"
+    assert kwargs["client_secret"] == "csec"
+    assert kwargs["token_url"] == "https://idp.example/token"
+    assert kwargs["scope"] == "system/*.rs"
+
+
 def test_create_connect_args_default_path():
     dialect = SqlOnFhirDialect()
     url = make_url("sqlonfhir://myhost:8080")

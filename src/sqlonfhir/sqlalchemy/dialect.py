@@ -110,6 +110,10 @@ class SqlOnFhirDialect(default.DefaultDialect):
         if "token" in query:
             kwargs["token"] = query.pop("token")
 
+        for oauth_key in ("client_id", "client_secret", "token_url", "scope"):
+            if oauth_key in query:
+                kwargs[oauth_key] = query.pop(oauth_key)
+
         if "timeout" in query:
             kwargs["timeout"] = int(query.pop("timeout"))
 
@@ -125,7 +129,8 @@ class SqlOnFhirDialect(default.DefaultDialect):
     def do_ping(self, dbapi_connection: Any) -> bool:
         """Verify the connection is alive by checking the server metadata."""
         try:
-            resp = dbapi_connection._session.get(
+            resp = dbapi_connection._request(
+                "GET",
                 f"{dbapi_connection.base_url}/metadata",
                 timeout=10,
             )
