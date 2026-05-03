@@ -249,8 +249,75 @@ def test_extract_table_names_cte(connection: Connection):
 
 
 def test_description_column_names(connection: Connection):
+    """SELECT * expands to the full ViewDefinition column list, not just the
+    keys that happen to appear in the response. The patients VD has 5 columns
+    (3 from the base select, 2 from the forEach select) — all should show up
+    even though SAMPLE_QUERY_RESPONSE only carries the first 3.
+    """
     cursor = connection.cursor()
     cursor.execute("SELECT * FROM patients")
 
     col_names = [d[0] for d in cursor.description]
-    assert col_names == ["patient_id", "gender", "birth_date"]
+    assert col_names == [
+        "patient_id",
+        "gender",
+        "birth_date",
+        "family_name",
+        "given_name",
+    ]
+
+
+def test_select_star_with_sparse_first_row(connection: Connection):
+    """Pathling omits null fields per row. If the first row only has `id`, we
+    must still describe the full schema and fill omitted values with None.
+    """
+    sparse_resp = _make_mock_response(
+        json_data=[
+            {"patient_id": "pat-1"},  # all other fields null -> omitted
+            {"patient_id": "pat-2", "gender": "female", "birth_date": "1985-01-01"},
+        ],
+        content_type="application/json",
+    )
+    connection._session.post.return_value = sparse_resp
+
+    cursor = connection.cursor()
+    cursor.execute("SELECT * FROM patients")
+
+    col_names = [d[0] for d in cursor.description]
+    assert col_names == [
+        "patient_id",
+        "gender",
+        "birth_date",
+        "family_name",
+        "given_name",
+    ]
+    rows = cursor.fetchall()
+    assert rows[0] == ("pat-1", None, None, None, None)
+    assert rows[1] == ("pat-2", "female", "1985-01-01", None, None)
+
+
+def test_merged_response_keys_when_star_cannot_expand(connection: Connection):
+    """When `*` can't be expanded (joins, etc.), the column list is the union
+    of keys across every row — not just row 0 — so a sparse first row doesn't
+    truncate the schema.
+    """
+    sparse_resp = _make_mock_response(
+        json_data=[
+            {"patient_id": "pat-1"},
+            {"patient_id": "pat-2", "extra": "something"},
+        ],
+        content_type="application/json",
+    )
+    connection._session.post.return_value = sparse_resp
+
+    cursor = connection.cursor()
+    # JOIN suppresses static `*` expansion, forcing the response-keys fallback.
+    cursor.execute(
+        "SELECT * FROM patients p JOIN conditions c ON p.patient_id = c.patient_ref"
+    )
+
+    col_names = [d[0] for d in cursor.description]
+    assert col_names == ["patient_id", "extra"]
+    rows = cursor.fetchall()
+    assert rows[0] == ("pat-1", None)
+    assert rows[1] == ("pat-2", "something")

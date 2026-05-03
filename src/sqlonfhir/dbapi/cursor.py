@@ -173,7 +173,11 @@ class Cursor:
             cols: list[str] = []
             for sel in stmt.selects:
                 if isinstance(sel, exp.Star):
-                    return None  # SELECT * — can't enumerate statically
+                    expanded = self._expand_star(stmt)
+                    if expanded is None:
+                        return None  # can't expand — fall back to response keys
+                    cols.extend(expanded)
+                    continue
                 alias = sel.alias
                 if alias:
                     cols.append(alias)
@@ -185,6 +189,40 @@ class Cursor:
             return cols if cols else None
         except sqlglot.errors.ParseError:
             return None
+
+    def _expand_star(self, stmt: exp.Select) -> list[str] | None:
+        """Resolve a bare `SELECT *` against the cached ViewDefinition.
+
+        Returns the column list when the FROM is a single known table (no
+        joins, no subqueries). Otherwise returns None and the caller falls
+        back to whatever keys the response carries.
+        """
+        if stmt.args.get("joins"):
+            return None
+        # sqlglot >=30 uses the key "from_"; older versions used "from".
+        from_ = stmt.args.get("from_") or stmt.args.get("from")
+        if from_ is None:
+            return None
+        src = from_.this
+        if not isinstance(src, exp.Table):
+            return None
+        vd = self._connection._view_definitions.get(src.name)
+        if vd is None:
+            return None
+        return [c["name"] for c in vd["columns"]]
+
+    @staticmethod
+    def _merge_response_keys(rows_data: list[dict[str, Any]]) -> list[str]:
+        """Union of keys across all rows, preserving first-seen order.
+
+        Pathling omits null fields from JSON, so the first row's keys alone
+        can miss columns present further down the result set.
+        """
+        seen: dict[str, None] = {}
+        for row in rows_data:
+            for k in row:
+                seen.setdefault(k, None)
+        return list(seen)
 
     def _extract_table_names(self, sql: str) -> set[str]:
         """Extract table names from SQL using sqlglot AST parsing."""
@@ -336,7 +374,7 @@ class Cursor:
         # Some servers (e.g. Pathling) omit null fields from JSON, so derive
         # the authoritative column list from the SQL when possible, falling
         # back to the response keys.
-        response_keys = list(rows_data[0].keys())
+        response_keys = self._merge_response_keys(rows_data)
         projected = (
             self._extract_projected_columns(self._last_operation)
             if self._last_operation
@@ -376,7 +414,7 @@ class Cursor:
 
         rows_data = [json.loads(line) for line in lines]
 
-        response_keys = list(rows_data[0].keys())
+        response_keys = self._merge_response_keys(rows_data)
         projected = (
             self._extract_projected_columns(self._last_operation)
             if self._last_operation
