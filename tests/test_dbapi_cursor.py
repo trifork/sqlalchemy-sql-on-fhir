@@ -248,6 +248,73 @@ def test_extract_table_names_cte(connection: Connection):
     assert "conditions" in names
 
 
+def _executed_sql(connection: Connection) -> str:
+    """Decode the SQL from the most recent $sqlquery-run POST."""
+    body = connection._session.post.call_args.kwargs.get("json")
+    if body is None:
+        body = connection._session.post.call_args[1].get("json")
+    encoded = body["parameter"][0]["resource"]["content"][0]["data"]
+    return base64.b64decode(encoded).decode("utf-8")
+
+
+def test_ansi_quoted_identifier_in_order_by_round_trips_to_backticks(
+    connection: Connection,
+):
+    """Regression: ANSI double-quoted identifiers must round-trip to Spark
+    backticks in *every* position — not just SELECT alias.
+
+    Superset's SQL Lab pretty-prints user backticks into ANSI double quotes
+    before handing the query to the driver. If we parse with the spark dialect,
+    `"col"` is a string literal in expression position, so `ORDER BY "patients"
+    DESC` re-emits as `ORDER BY 'patients' DESC` — a sort by a constant, which
+    silently produces an arbitrary row order. Top-N charts then show wrong
+    rows. The fix is to parse with an ANSI-compatible dialect (duckdb) so
+    `"col"` is an identifier in every position.
+    """
+    cursor = connection.cursor()
+    cursor.execute(
+        'SELECT gender, COUNT(DISTINCT patient_id) AS "Patients" '
+        "FROM patients "
+        'GROUP BY gender ORDER BY "Patients" DESC LIMIT 5'
+    )
+
+    sent = _executed_sql(connection)
+
+    # Both alias and ORDER BY reference must use backticks (spark identifier
+    # quoting), not single quotes (string literal).
+    assert "AS `Patients`" in sent
+    assert "ORDER BY `Patients` DESC" in sent
+    assert "ORDER BY 'Patients'" not in sent
+
+
+def test_ansi_quoted_identifier_in_where_round_trips_to_backticks(
+    connection: Connection,
+):
+    """Same identifier hazard, but in a WHERE comparison."""
+    cursor = connection.cursor()
+    cursor.execute('SELECT patient_id FROM patients WHERE "gender" = \'male\'')
+
+    sent = _executed_sql(connection)
+
+    assert "`gender`" in sent
+    # The string literal must remain a string, not become a column reference.
+    assert "'male'" in sent
+
+
+def test_string_literals_with_single_quotes_are_preserved(connection: Connection):
+    """The duckdb-parse change must not corrupt single-quoted string literals."""
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT patient_id FROM patients "
+        "WHERE gender = 'female' AND birth_date > '1990-01-01'"
+    )
+
+    sent = _executed_sql(connection)
+
+    assert "'female'" in sent
+    assert "'1990-01-01'" in sent
+
+
 def test_description_column_names(connection: Connection):
     """SELECT * expands to the full ViewDefinition column list, not just the
     keys that happen to appear in the response. The patients VD has 5 columns

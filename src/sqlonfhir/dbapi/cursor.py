@@ -54,14 +54,27 @@ class Cursor:
         self.description = None
         self.rowcount = -1
 
-        # Transpile to Spark SQL since some SQL-on-FHIR servers (e.g. Pathling)
-        # run Spark under the hood. Converts ANSI double-quoted identifiers
-        # (e.g. "col") to backtick-quoted (`col`) and normalises other dialect
-        # differences. Also strips schema prefixes (`default`.table -> table)
-        # since SQL-on-FHIR has no schema concept — the dialect returns
-        # "default" only for SQL Lab UX.
+        # Translate ANSI-style SQL (the input we get from SQLAlchemy /
+        # Superset) into Spark SQL (what Pathling's $sqlquery-run requires).
+        # Pathling rejects ANSI double-quoted identifiers — `... AS "P" ...
+        # ORDER BY "P"` returns PARSE_SYNTAX_ERROR — so the conversion to
+        # backticks is mandatory, not cosmetic. Also strips schema prefixes
+        # (`default`.table -> table) since SQL-on-FHIR has no schema concept
+        # and the dialect only returns "default" for SQL Lab UX.
+        #
+        # The parser dialect must be ANSI-aware, NOT spark, even though the
+        # target *is* Spark. sqlglot's spark parser treats `"X"` as a string
+        # literal in expression position; with that parser, `ORDER BY "X"`
+        # becomes `ORDER BY 'X'` on emit — a sort by a constant string, which
+        # silently corrupts top-N queries (the rows come back in arbitrary
+        # order). duckdb is sqlglot's most ANSI-faithful parser and emits
+        # nothing exotic when transpiling to spark. Tradeoff: a raw Spark
+        # query that uses `"foo"` as a string literal (only valid in Spark
+        # default non-ANSI mode) is reinterpreted as a column reference.
+        # In practice every caller — SQLAlchemy compilation, Superset SQL
+        # Lab — uses single quotes for strings, so this is acceptable.
         try:
-            tree = sqlglot.parse_one(operation, dialect="spark")
+            tree = sqlglot.parse_one(operation, dialect="duckdb")
             for table in tree.find_all(exp.Table):
                 if table.args.get("db"):
                     table.set("db", None)
