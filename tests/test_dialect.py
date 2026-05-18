@@ -127,3 +127,26 @@ def test_engine_execute_query(mock_session):
             rows = result.fetchall()
             assert len(rows) == 3
             assert rows[0][0] == "pat-1"
+
+
+def test_boolean_literal_renders_as_true_false():
+    """Booleans must compile to TRUE/FALSE, not 1/0 — the FHIR backend
+    rejects integer-to-boolean coercion in WHERE clauses (e.g. `active IN (1)`).
+    """
+    from sqlalchemy import Column, MetaData, Table, Boolean, String, select
+
+    metadata = MetaData()
+    practitioner = Table(
+        "practitioner",
+        metadata,
+        Column("id", String),
+        Column("active", Boolean),
+    )
+    stmt = select(practitioner.c.id).where(practitioner.c.active.in_([True]))
+    compiled = stmt.compile(
+        dialect=SqlOnFhirDialect(),
+        compile_kwargs={"literal_binds": True},
+    )
+    sql = str(compiled)
+    assert "true" in sql.lower()
+    assert " IN (1)" not in sql and " IN (0)" not in sql
