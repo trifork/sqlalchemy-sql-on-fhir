@@ -1,0 +1,159 @@
+name: Pathling compatibility
+
+# Container registries don't deliver image-published webhooks across repos, so
+# this workflow polls the GitHub release feed of aehrc/pathling once a day and
+# runs the integration test suite against the newest published server image.
+# A new release is picked up within 24h; manual runs are supported via the
+# workflow_dispatch input.
+#
+# The aehrc/pathling repo publishes two parallel release lines:
+#   - `vX.Y.Z`        — the broader Pathling library/CLI (we don't care).
+#   - `server-vX.Y.Z` — the FHIR server we actually integrate against.
+# Only `server-v*` tags are considered. The corresponding GHCR image tag is the
+# numeric tail, e.g. `server-v2.0.0` → ghcr.io/aehrc/pathling:2.0.0.
+
+on:
+  schedule:
+    # Daily at 06:17 UTC. Off-peak and slightly off the hour to avoid the
+    # spike of cron jobs on the top of the hour.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Full image reference (e.g. ghcr.io/aehrc/pathling:2.0.0). Overrides automatic detection."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: pathling-compat
+  cancel-in-progress: false
+
+jobs:
+  resolve-image:
+    name: Resolve Pathling image
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.pick.outputs.image }}
+      tag: ${{ steps.pick.outputs.tag }}
+      release: ${{ steps.pick.outputs.release }}
+    steps:
+      - name: Pick image
+        id: pick
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_IMAGE: ${{ inputs.image }}
+          # Optional repo-level override (Settings → Variables) for forks or
+          # private mirrors. Defaults to ghcr.io/aehrc/pathling.
+          REPO_OVERRIDE: ${{ vars.PATHLING_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          repo="${REPO_OVERRIDE:-ghcr.io/aehrc/pathling}"
+
+          if [ -n "${INPUT_IMAGE:-}" ]; then
+            image="$INPUT_IMAGE"
+            tag="${image##*:}"
+            release="(manual)"
+            echo "Using manually supplied image: $image"
+          else
+            # Newest non-prerelease server-v* release from upstream.
+            release=$(
+              gh api 'repos/aehrc/pathling/releases?per_page=50' \
+                --jq '[.[] | select(.prerelease == false) | select(.tag_name | startswith("server-v")) | .tag_name]
+                      | sort_by(split("-v")[1] | split(".") | map(tonumber)) | last'
+            )
+            if [ -z "$release" ] || [ "$release" = "null" ]; then
+              echo "::error::Could not find a server-v* release on aehrc/pathling"
+              exit 1
+            fi
+            tag="${release#server-v}"
+            image="${repo}:${tag}"
+            echo "Newest server release: $release → image $image"
+          fi
+          echo "image=${image}"     >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}"         >> "$GITHUB_OUTPUT"
+          echo "release=${release}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Pathling compatibility run"
+            echo ""
+            echo "- Upstream release: \`${release}\`"
+            echo "- Image: \`${image}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  integration:
+    name: Integration tests (${{ needs.resolve-image.outputs.release }})
+    runs-on: ubuntu-latest
+    needs: resolve-image
+    env:
+      PATHLING_IMAGE: ${{ needs.resolve-image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Pre-pull Pathling image
+        # Pull explicitly so docker-pull time doesn't bleed into the pytest
+        # readiness window — the conftest startup budget assumes a warm cache.
+        run: docker pull "$PATHLING_IMAGE"
+
+      - name: Run unit tests
+        run: uv run pytest -q
+
+      - name: Run integration tests
+        run: uv run pytest -m integration -q tests/integration/
+
+  notify-on-failure:
+    name: Open issue on failure
+    runs-on: ubuntu-latest
+    needs: [resolve-image, integration]
+    if: failure() && github.event_name == 'schedule'
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const release = "${{ needs.resolve-image.outputs.release }}";
+            const image = "${{ needs.resolve-image.outputs.image }}";
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = `Pathling compatibility broken on ${release}`;
+            const body = [
+              `The scheduled compatibility run against \`${image}\` failed.`,
+              ``,
+              `- Workflow run: ${runUrl}`,
+              `- Upstream release: \`${release}\``,
+              ``,
+              `Likely causes: upstream Pathling changed the \`$sqlquery-run\` envelope, response shape, supported SQL dialect, or removed an operation we rely on. Inspect the run log to confirm before bumping the supported version.`,
+            ].join("\n");
+
+            // Reuse an existing open issue for the same release if one is already filed.
+            const { data: existing } = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open in:title "${title}"`,
+            });
+            if (existing.total_count > 0) {
+              const issueNumber = existing.items[0].number;
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: issueNumber,
+                body: `Another scheduled run failed: ${runUrl}`,
+              });
+              core.notice(`Commented on existing issue #${issueNumber}`);
+              return;
+            }
+            const { data: issue } = await github.rest.issues.create({
+              ...context.repo,
+              title,
+              body,
+              labels: ["pathling-compat", "ci"],
+            });
+            core.notice(`Opened issue #${issue.number}`);

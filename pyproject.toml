@@ -33,3 +33,9 @@ sqlonfhir = "sqlonfhir.superset.engine_spec:SqlOnFhirEngineSpec"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sqlonfhir"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: tests that spin up a real Pathling container via Docker. Opt in with `pytest -m integration`.",
+]
+addopts = "-m 'not integration'"

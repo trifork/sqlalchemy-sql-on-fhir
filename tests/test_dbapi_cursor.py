@@ -207,7 +207,11 @@ def test_empty_result(connection: Connection):
 
 
 def test_execute_with_parameters(connection: Connection):
-    """Query parameters are included in the FHIR request."""
+    """Runtime query parameters are wrapped in a typed Parameters resource.
+
+    Each binding uses the appropriate value[x] field rather than being
+    string-coerced, so the FHIR server gets proper boolean/integer/date types.
+    """
     cursor = connection.cursor()
     cursor.execute(
         "SELECT * FROM patients WHERE gender = :gender",
@@ -218,13 +222,38 @@ def test_execute_with_parameters(connection: Connection):
     body = call_args.kwargs.get("json") or call_args[1].get("json")
     params = body["parameter"]
 
-    # Should have queryResource + 1 parameter binding
+    # queryResource + a single "parameters" wrapper holding all bindings.
     assert len(params) == 2
-    param_binding = params[1]
-    assert param_binding["name"] == "parameter"
-    parts = {p["name"]: p.get("valueString") for p in param_binding["part"]}
-    assert parts["name"] == "gender"
-    assert parts["value"] == "male"
+    wrapper = params[1]
+    assert wrapper["name"] == "parameters"
+    inner = wrapper["resource"]
+    assert inner["resourceType"] == "Parameters"
+    assert inner["parameter"] == [{"name": "gender", "valueString": "male"}]
+
+
+def test_execute_with_typed_parameters(connection: Connection):
+    """Bool/int/float bindings are encoded with the matching value[x] field."""
+    import datetime as dt
+
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT * FROM patients WHERE active = :active AND age = :age "
+        "AND ratio = :ratio AND born = :born",
+        {
+            "active": True,
+            "age": 42,
+            "ratio": 1.5,
+            "born": dt.date(1990, 1, 2),
+        },
+    )
+
+    body = connection._session.post.call_args.kwargs["json"]
+    inner = body["parameter"][1]["resource"]["parameter"]
+    by_name = {p["name"]: p for p in inner}
+    assert by_name["active"] == {"name": "active", "valueBoolean": True}
+    assert by_name["age"] == {"name": "age", "valueInteger": 42}
+    assert by_name["ratio"] == {"name": "ratio", "valueDecimal": 1.5}
+    assert by_name["born"] == {"name": "born", "valueDate": "1990-01-02"}
 
 
 def test_extract_table_names_subquery(connection: Connection):

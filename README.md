@@ -113,3 +113,55 @@ cursor.execute("SELECT patient_id, gender FROM patients")
 for row in cursor.fetchall():
     print(row)
 ```
+
+## Testing
+
+### Unit tests
+
+```bash
+uv sync --all-extras --dev
+uv run pytest
+```
+
+The default run is offline and skips anything marked `integration`.
+
+### Integration tests
+
+End-to-end checks run the suite against a real Pathling FHIR server in
+a Docker container. The fixture in `tests/integration/conftest.py` spins
+up the container, waits for `/fhir/metadata` to return 200, and tears it
+down at session end.
+
+Requires Docker. Run with:
+
+```bash
+uv run pytest -m integration
+```
+
+By default the image tag is resolved at session start from the upstream
+`aehrc/pathling` GitHub release feed — the newest non-prerelease
+`server-v*` tag wins. Override knobs (in precedence order):
+
+| Variable                    | Effect                                                      |
+|-----------------------------|-------------------------------------------------------------|
+| `PATHLING_IMAGE`            | Full image reference; skips upstream lookup entirely.       |
+| `PATHLING_VERSION`          | Version only; combined with `PATHLING_REPOSITORY`.          |
+| `PATHLING_REPOSITORY`       | Repository without tag (default `ghcr.io/aehrc/pathling`).  |
+| `PATHLING_FALLBACK_VERSION` | Used only if the GitHub API call fails.                     |
+
+```bash
+# Pin a specific server release
+PATHLING_VERSION=2.0.0 uv run pytest -m integration
+
+# Test against a private mirror
+PATHLING_IMAGE=my.registry/pathling:custom uv run pytest -m integration
+```
+
+### Continuous upstream-compatibility check
+
+`.github/workflows/pathling-compat.yml` runs the integration suite daily
+against the newest published `server-v*` release of `aehrc/pathling`. On
+scheduled failures it opens (or comments on) a `pathling-compat` issue
+so an upstream change that breaks the driver doesn't go unnoticed.
+Trigger manually with `workflow_dispatch` and an optional `image` input
+to test any specific reference.
