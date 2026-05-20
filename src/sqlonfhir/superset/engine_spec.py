@@ -31,18 +31,22 @@ class SqlOnFhirEngineSpec(BaseEngineSpec):
     disable_ssh_tunneling = True
 
     # Time grain expressions (Spark SQL syntax — used by e.g. Pathling).
-    # Needed for time-series chart grouping and for Superset's Prophet
-    # post-processing, which receives the grain ISO 8601 string as input.
+    # Mirrors Superset's Hive/Spark engine spec for native grains and adds
+    # sub-hour buckets using unix_timestamp modulo arithmetic.
     _time_grain_expressions: dict[str | None, str] = {
         None: "{col}",
-        "PT1S": "CAST({col} AS TIMESTAMP)",
-        "PT1M": "DATE_TRUNC('minute', {col})",
-        "PT1H": "DATE_TRUNC('hour', {col})",
-        "P1D": "DATE_TRUNC('day', {col})",
-        "P1W": "DATE_TRUNC('week', {col})",
-        "P1M": "DATE_TRUNC('month', {col})",
-        "P3M": "DATE_TRUNC('quarter', {col})",
-        "P1Y": "DATE_TRUNC('year', {col})",
+        "PT1S": "from_unixtime(unix_timestamp({col}), 'yyyy-MM-dd HH:mm:ss')",
+        "PT1M": "from_unixtime(unix_timestamp({col}), 'yyyy-MM-dd HH:mm:00')",
+        "PT5M": "from_unixtime(unix_timestamp({col}) - unix_timestamp({col}) % 300, 'yyyy-MM-dd HH:mm:00')",  # noqa: E501
+        "PT15M": "from_unixtime(unix_timestamp({col}) - unix_timestamp({col}) % 900, 'yyyy-MM-dd HH:mm:00')",  # noqa: E501
+        "PT30M": "from_unixtime(unix_timestamp({col}) - unix_timestamp({col}) % 1800, 'yyyy-MM-dd HH:mm:00')",  # noqa: E501
+        "PT1H": "from_unixtime(unix_timestamp({col}), 'yyyy-MM-dd HH:00:00')",
+        "PT6H": "from_unixtime(unix_timestamp({col}) - unix_timestamp({col}) % 21600, 'yyyy-MM-dd HH:00:00')",  # noqa: E501
+        "P1D": "from_unixtime(unix_timestamp({col}), 'yyyy-MM-dd 00:00:00')",
+        "P1W": "date_format(date_sub({col}, CAST(7 - from_unixtime(unix_timestamp({col}), 'u') AS INT)), 'yyyy-MM-dd 00:00:00')",  # noqa: E501
+        "P1M": "from_unixtime(unix_timestamp({col}), 'yyyy-MM-01 00:00:00')",
+        "P3M": "date_format(add_months(trunc({col}, 'MM'), -(month({col}) - 1) % 3), 'yyyy-MM-dd 00:00:00')",  # noqa: E501
+        "P1Y": "from_unixtime(unix_timestamp({col}), 'yyyy-01-01 00:00:00')",
     }
 
     @classmethod
