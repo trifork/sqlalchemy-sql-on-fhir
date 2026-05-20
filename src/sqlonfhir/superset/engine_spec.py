@@ -43,7 +43,7 @@ class SqlOnFhirEngineSpec(BaseEngineSpec):
         "PT1H": "from_unixtime(unix_timestamp({col}), 'yyyy-MM-dd HH:00:00')",
         "PT6H": "from_unixtime(unix_timestamp({col}) - unix_timestamp({col}) % 21600, 'yyyy-MM-dd HH:00:00')",  # noqa: E501
         "P1D": "from_unixtime(unix_timestamp({col}), 'yyyy-MM-dd 00:00:00')",
-        "P1W": "date_format(date_sub({col}, CAST(7 - from_unixtime(unix_timestamp({col}), 'u') AS INT)), 'yyyy-MM-dd 00:00:00')",  # noqa: E501
+        "P1W": "date_format(date_trunc('week', {col}), 'yyyy-MM-dd 00:00:00')",
         "P1M": "from_unixtime(unix_timestamp({col}), 'yyyy-MM-01 00:00:00')",
         "P3M": "date_format(add_months(trunc({col}, 'MM'), -(month({col}) - 1) % 3), 'yyyy-MM-dd 00:00:00')",  # noqa: E501
         "P1Y": "from_unixtime(unix_timestamp({col}), 'yyyy-01-01 00:00:00')",
