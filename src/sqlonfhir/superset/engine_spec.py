@@ -30,9 +30,19 @@ class SqlOnFhirEngineSpec(BaseEngineSpec):
     supports_file_upload = False
     disable_ssh_tunneling = True
 
-    # Time grain expressions (Spark SQL syntax — used by e.g. Pathling)
+    # Time grain expressions (Spark SQL syntax — used by e.g. Pathling).
+    # Needed for time-series chart grouping and for Superset's Prophet
+    # post-processing, which receives the grain ISO 8601 string as input.
     _time_grain_expressions: dict[str | None, str] = {
         None: "{col}",
+        "PT1S": "CAST({col} AS TIMESTAMP)",
+        "PT1M": "DATE_TRUNC('minute', {col})",
+        "PT1H": "DATE_TRUNC('hour', {col})",
+        "P1D": "DATE_TRUNC('day', {col})",
+        "P1W": "DATE_TRUNC('week', {col})",
+        "P1M": "DATE_TRUNC('month', {col})",
+        "P3M": "DATE_TRUNC('quarter', {col})",
+        "P1Y": "DATE_TRUNC('year', {col})",
     }
 
     @classmethod
