@@ -6,3 +6,4 @@ src/sqlonfhir/dbapi/__pycache__
 src/sqlonfhir/__pycache__
 src/sqlonfhir/sqlalchemy/__pycache__
 tests/integration/__pycache__
+src/sqlonfhir/superset/__pycache__
