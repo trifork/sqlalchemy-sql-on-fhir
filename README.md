@@ -151,7 +151,7 @@ By default the image tag is resolved at session start from the upstream
 
 ```bash
 # Pin a specific server release
-PATHLING_VERSION=2.0.0 uv run pytest -m integration
+PATHLING_VERSION=3.0.0 uv run pytest -m integration
 
 # Test against a private mirror
 PATHLING_IMAGE=my.registry/pathling:custom uv run pytest -m integration
