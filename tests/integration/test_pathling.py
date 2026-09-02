@@ -52,7 +52,7 @@ import pytest
 from sqlalchemy import Boolean, Column, MetaData, String, Table, create_engine, select
 
 from sqlonfhir.dbapi import connect
-from sqlonfhir.dbapi.exceptions import DatabaseError
+from sqlonfhir.dbapi.exceptions import ProgrammingError
 from sqlonfhir.sqlalchemy.dialect import SqlOnFhirDialect
 
 pytestmark = pytest.mark.integration
@@ -80,7 +80,7 @@ def cursor(pathling_base_url):
 
 
 def test_select_true_round_trip(cursor):
-    """Smoke test: the driver speaks Pathling's $sqlquery-run dialect.
+    """Smoke test: the driver speaks Pathling's $sql-run dialect.
 
     Regression for the Library.type coding bug (PR #1) — under the old
     ``logic-library`` coding Pathling responded 400 to every query.
@@ -100,14 +100,16 @@ def test_boolean_in_clause_with_boolean_literal_succeeds(cursor):
 def test_boolean_in_clause_with_integer_literal_still_fails(cursor):
     """Repro of the underlying Spark behavior that motivated the dialect fix.
 
-    ``BOOLEAN IN (INT)`` triggers DATATYPE_MISMATCH in Catalyst and Pathling
-    returns 500. This test pins the upstream behavior so we notice if it
-    ever changes (in which case we can relax our literal handling).
+    ``BOOLEAN IN (INT)`` triggers DATATYPE_MISMATCH in Catalyst. This test
+    pins the upstream behavior so we notice if it ever changes (in which
+    case we can relax our literal handling).
+
+    Pathling 3.0+ reports this as a 422 with the real Catalyst diagnostic
+    (previously it was an opaque 500 — see release notes for server-v3.0.0,
+    issue #2723).
     """
-    with pytest.raises(DatabaseError) as exc_info:
+    with pytest.raises(ProgrammingError, match="DATATYPE_MISMATCH"):
         cursor.execute("SELECT TRUE IN (1) AS r")
-    # Pathling collapses the exception into a generic 500.
-    assert "500" in str(exc_info.value)
 
 
 def test_sqlalchemy_boolean_filter_renders_as_true_literal():
@@ -135,7 +137,7 @@ def test_sqlalchemy_boolean_filter_renders_as_true_literal():
 
 # --- Superset time-grain expressions ----------------------------------------
 #
-# Regression: Pathling's `$sqlquery-run` rejects the bare
+# Regression: Pathling's `$sql-run` rejects the bare
 # `from_unixtime(unix_timestamp(col), 'fmt')` form that Superset's stock
 # Hive/Spark engine spec maps most grains to. The failure surfaces as an
 # opaque HTTP 500 during chart-data introspection (the `WHERE 1 != 1` /
@@ -176,7 +178,7 @@ def test_time_grain_expression_executes_on_pathling(cursor, grain):
     Runs the rendered expression as a top-level `SELECT <expr>` (no FROM),
     which is how Pathling exercises the planner without needing a registered
     ViewDefinition. Failure mode under the old mapping was an HTTP 500 from
-    `$sqlquery-run`.
+    `$sql-run`.
     """
     expr = _render_grain(grain, _TS_LITERAL)
     cursor.execute(f"SELECT {expr} AS bucket")
@@ -227,7 +229,7 @@ def test_time_grain_in_chart_shaped_query_succeeds(cursor, grain):
 
 
 def test_sqlalchemy_engine_executes_against_live_server(pathling_base_url):
-    """End-to-end: the SQLAlchemy engine drives `$sqlquery-run` successfully.
+    """End-to-end: the SQLAlchemy engine drives `$sql-run` successfully.
 
     Exercises the full chain — engine → dialect → DBAPI cursor → Library
     envelope → Pathling — with a query that would have failed under either

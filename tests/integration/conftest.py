@@ -42,7 +42,7 @@ DEFAULT_REPOSITORY = "ghcr.io/aehrc/pathling"
 # Last-known-good fallback used when the GitHub release feed is unreachable.
 # Bump this opportunistically when the scheduled compat job picks up a new
 # version successfully.
-FALLBACK_VERSION = "2.0.0"
+FALLBACK_VERSION = "3.0.0"
 STARTUP_TIMEOUT_SECONDS = 180
 GITHUB_RELEASES_URL = "https://api.github.com/repos/aehrc/pathling/releases?per_page=50"
 

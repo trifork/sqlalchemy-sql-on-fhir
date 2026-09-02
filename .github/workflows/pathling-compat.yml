@@ -133,7 +133,7 @@ jobs:
               `- Workflow run: ${runUrl}`,
               `- Upstream release: \`${release}\``,
               ``,
-              `Likely causes: upstream Pathling changed the \`$sqlquery-run\` envelope, response shape, supported SQL dialect, or removed an operation we rely on. Inspect the run log to confirm before bumping the supported version.`,
+              `Likely causes: upstream Pathling changed the \`$sql-run\` envelope, response shape, supported SQL dialect, or removed an operation we rely on. Inspect the run log to confirm before bumping the supported version.`,
             ].join("\n");
 
             // Reuse an existing open issue for the same release if one is already filed.

@@ -195,6 +195,7 @@ class Connection:
                     "id": vid,
                     "columns": columns,
                     "resource_type": resource_type,
+                    "resource": resource,
                 }
 
             # Follow pagination links

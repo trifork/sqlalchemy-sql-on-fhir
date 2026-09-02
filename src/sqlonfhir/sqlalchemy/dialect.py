@@ -64,7 +64,7 @@ class SqlOnFhirDialect(default.DefaultDialect):
     postfetch_lastrowid = False
     preexecute_autoincrement_sequences = False
     # Render BOOLEAN literals as TRUE/FALSE rather than 1/0. The FHIR backend
-    # (Spark SQL via $sqlquery-run) rejects integer-to-boolean coercion, e.g.
+    # (Spark SQL via $sql-run) rejects integer-to-boolean coercion, e.g.
     # `WHERE active IN (1)` returns 500.
     supports_native_boolean = True
 

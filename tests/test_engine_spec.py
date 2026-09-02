@@ -40,7 +40,7 @@ def grains() -> dict:
     return SqlOnFhirEngineSpec._time_grain_expressions
 
 
-# The Pathling $sqlquery-run planner rejects `from_unixtime(unix_timestamp(
+# The Pathling $sql-run planner rejects `from_unixtime(unix_timestamp(
 # col), 'fmt')` during Superset's chart-data introspection (LIMIT-0 form).
 # Make sure no grain falls back to that pattern. `date_format(...)` and
 # `timestamp_seconds(...)` wrappers are fine; the standalone bare form is

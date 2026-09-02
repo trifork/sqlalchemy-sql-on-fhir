@@ -1,6 +1,6 @@
 """DBAPI 2.0 Cursor for SQL-on-FHIR servers.
 
-Translates SQL queries into FHIR `$sqlquery-run` HTTP POST requests, mapping
+Translates SQL queries into FHIR `$sql-run` HTTP POST requests, mapping
 table names to ViewDefinition references.
 """
 
@@ -40,6 +40,31 @@ def _runtime_parameter_entry(name: str, value: Any) -> dict[str, Any]:
         }
     return {"name": name, "valueString": str(value)}
 
+
+def _fhir_parameter_type(value: Any) -> str:
+    """Return the FHIR type code for a Library.parameter ParameterDefinition.
+
+    Must match the value[x] field chosen by `_runtime_parameter_entry` above —
+    Pathling validates each bound parameter against the Library's declared
+    parameter list and rejects a binding whose declared type doesn't match.
+    """
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "decimal"
+    if isinstance(value, _dt.datetime):
+        return "dateTime"
+    if isinstance(value, _dt.date):
+        return "date"
+    if isinstance(value, _dt.time):
+        return "time"
+    if isinstance(value, (bytes, bytearray)):
+        return "base64Binary"
+    return "string"
+
+
 from sqlonfhir.dbapi.exceptions import (
     DatabaseError,
     InterfaceError,
@@ -53,7 +78,7 @@ if TYPE_CHECKING:
 
 
 class Cursor:
-    """A DBAPI 2.0 cursor that executes SQL via the `$sqlquery-run` operation."""
+    """A DBAPI 2.0 cursor that executes SQL via the `$sql-run` operation."""
 
     arraysize: int = 100
 
@@ -67,12 +92,16 @@ class Cursor:
         self._last_operation: str | None = None
 
     def execute(self, operation: str, parameters: dict[str, Any] | None = None) -> None:
-        """Execute a SQL query via the `$sqlquery-run` operation.
+        """Execute a SQL query via the `$sql-run` operation.
 
         1. Parse table names from the SQL using sqlglot.
-        2. Map each table name to a ViewDefinition ID from the connection cache.
-        3. Build the FHIR Parameters resource with a Library containing the SQL.
-        4. POST to $sqlquery-run and parse the response.
+        2. Map each table name to a ViewDefinition from the connection cache.
+        3. Build the FHIR Parameters resource: a Library subject referencing
+           each dependency by a synthetic canonical URL, plus one `context`
+           parameter per dependency carrying the full ViewDefinition inline
+           (Pathling resolves relatedArtifact dependencies by canonical URL,
+           not by relative reference).
+        4. POST to $sql-run and parse the response.
         """
         self._check_closed()
         self._rows = []
@@ -81,7 +110,7 @@ class Cursor:
         self.rowcount = -1
 
         # Translate ANSI-style SQL (the input we get from SQLAlchemy /
-        # Superset) into Spark SQL (what Pathling's $sqlquery-run requires).
+        # Superset) into Spark SQL (what Pathling's $sql-run requires).
         # Pathling rejects ANSI double-quoted identifiers — `... AS "P" ...
         # ORDER BY "P"` returns PARSE_SYNTAX_ERROR — so the conversion to
         # backticks is mandatory, not cosmetic. Also strips schema prefixes
@@ -110,10 +139,12 @@ class Cursor:
 
         self._last_operation = operation
         table_names = self._extract_table_names(operation)
-        related_artifacts = self._build_related_artifacts(table_names)
-        fhir_params = self._build_fhir_parameters(operation, related_artifacts, parameters)
+        related_artifacts, context = self._build_dependencies(table_names)
+        fhir_params = self._build_fhir_parameters(
+            operation, related_artifacts, context, parameters
+        )
 
-        url = f"{self._connection.base_url}/$sqlquery-run"
+        url = f"{self._connection.base_url}/$sql-run"
         query_params = {"_format": "json"}
 
         try:
@@ -282,11 +313,20 @@ class Cursor:
             pass
         return table_names
 
-    def _build_related_artifacts(
+    def _build_dependencies(
         self, table_names: set[str]
-    ) -> list[dict[str, Any]]:
-        """Map table names to FHIR relatedArtifact entries."""
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Map table names to relatedArtifact entries and inline `context` resources.
+
+        Pathling resolves a Library's relatedArtifact dependencies by matching
+        `relatedArtifact.resource` against a supplied `context` resource's
+        `url` — a relative reference like `ViewDefinition/{id}` is rejected as
+        not being an absolute canonical URL, and there's no requirement that
+        the canonical actually resolve on the server, so a synthetic per-view
+        urn is enough as long as the same value is used in both places.
+        """
         artifacts: list[dict[str, Any]] = []
+        context: list[dict[str, Any]] = []
         view_defs = self._connection._view_definitions
 
         for name in table_names:
@@ -296,22 +336,25 @@ class Cursor:
                     f"{', '.join(sorted(view_defs.keys()))}"
                 )
             vd = view_defs[name]
+            canonical_url = f"urn:sqlonfhir:view-definition:{vd['id']}"
             artifacts.append(
                 {
                     "type": "depends-on",
                     "label": name,
-                    "resource": f"ViewDefinition/{vd['id']}",
+                    "resource": canonical_url,
                 }
             )
-        return artifacts
+            context.append({**vd["resource"], "url": canonical_url})
+        return artifacts, context
 
     def _build_fhir_parameters(
         self,
         sql: str,
         related_artifacts: list[dict[str, Any]],
+        context: list[dict[str, Any]],
         parameters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Build the FHIR Parameters resource for $sqlquery-run."""
+        """Build the FHIR Parameters resource for $sql-run."""
         sql_b64 = base64.b64encode(sql.encode("utf-8")).decode("ascii")
 
         library: dict[str, Any] = {
@@ -336,14 +379,21 @@ class Cursor:
 
         params_list: list[dict[str, Any]] = [
             {
-                "name": "queryResource",
+                "name": "subjectResource",
                 "resource": library,
             }
         ]
+        params_list.extend({"name": "context", "resource": vd} for vd in context)
 
         # Runtime parameter bindings — wrapped in a single typed Parameters resource
         # so that each value carries its FHIR type rather than being string-coerced.
+        # Pathling also requires each bound name to be declared up front on the
+        # Library, with a matching type, or it rejects the binding.
         if parameters:
+            library["parameter"] = [
+                {"name": name, "use": "in", "type": _fhir_parameter_type(value)}
+                for name, value in parameters.items()
+            ]
             inner_params = [
                 _runtime_parameter_entry(name, value)
                 for name, value in parameters.items()
@@ -383,10 +433,15 @@ class Cursor:
             raise ProgrammingError(f"Resource not found: {message}")
         if resp.status_code == 400:
             raise ProgrammingError(f"Bad request: {message}")
+        if resp.status_code == 422:
+            # Pathling 3.0+ reports Spark analysis errors (e.g. a type-mismatch
+            # in the query) as 422 with a real diagnostic, rather than the
+            # opaque 500 it used to return for the same class of error.
+            raise ProgrammingError(f"Query error: {message}")
         raise DatabaseError(f"Server error ({resp.status_code}): {message}")
 
     def _parse_response(self, resp: requests.Response) -> None:
-        """Parse the $sqlquery-run JSON response into rows and description."""
+        """Parse the $sql-run JSON response into rows and description."""
         content_type = resp.headers.get("Content-Type", "")
 
         if "application/x-ndjson" in content_type or "ndjson" in content_type:

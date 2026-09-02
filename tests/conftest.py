@@ -64,7 +64,7 @@ SAMPLE_VIEW_DEFINITION_BUNDLE: dict[str, Any] = {
     ],
 }
 
-# Sample $sqlquery-run JSON response
+# Sample $sql-run JSON response
 SAMPLE_QUERY_RESPONSE: list[dict[str, Any]] = [
     {"patient_id": "pat-1", "gender": "male", "birth_date": "1990-05-15"},
     {"patient_id": "pat-2", "gender": "female", "birth_date": "1985-11-22"},
@@ -118,7 +118,7 @@ def mock_session():
         )
         session.get.return_value = vd_response
 
-        # Mock POST for $sqlquery-run
+        # Mock POST for $sql-run
         query_response = _make_mock_response(
             json_data=SAMPLE_QUERY_RESPONSE,
             content_type="application/json",

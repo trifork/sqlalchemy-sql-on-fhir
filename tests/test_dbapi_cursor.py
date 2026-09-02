@@ -44,8 +44,8 @@ def test_execute_builds_correct_fhir_params(connection: Connection):
 
     assert body["resourceType"] == "Parameters"
     params = body["parameter"]
-    assert len(params) == 1
-    assert params[0]["name"] == "queryResource"
+    assert len(params) == 2  # subjectResource + one context entry
+    assert params[0]["name"] == "subjectResource"
 
     library = params[0]["resource"]
     assert library["resourceType"] == "Library"
@@ -55,11 +55,18 @@ def test_execute_builds_correct_fhir_params(connection: Connection):
     decoded_sql = base64.b64decode(library["content"][0]["data"]).decode("utf-8")
     assert decoded_sql == sql
 
-    # Verify relatedArtifact
+    # Verify relatedArtifact references a canonical URL, not a relative
+    # reference — Pathling rejects "ViewDefinition/{id}" as not-absolute.
     artifacts = library["relatedArtifact"]
     assert len(artifacts) == 1
     assert artifacts[0]["label"] == "patients"
-    assert artifacts[0]["resource"] == "ViewDefinition/vd-patients-1"
+    assert artifacts[0]["resource"] == "urn:sqlonfhir:view-definition:vd-patients-1"
+
+    # Verify the matching context entry carries the same canonical as its url
+    context_entries = [p for p in params if p["name"] == "context"]
+    assert len(context_entries) == 1
+    assert context_entries[0]["resource"]["url"] == artifacts[0]["resource"]
+    assert context_entries[0]["resource"]["name"] == "patients"
 
 
 def test_execute_join_multiple_tables(connection: Connection):
@@ -79,6 +86,9 @@ def test_execute_join_multiple_tables(connection: Connection):
 
     labels = {a["label"] for a in artifacts}
     assert labels == {"patients", "conditions"}
+
+    context_urls = {p["resource"]["url"] for p in body["parameter"] if p["name"] == "context"}
+    assert context_urls == {a["resource"] for a in artifacts}
 
 
 def test_execute_unknown_table_raises_error(connection: Connection):
@@ -173,6 +183,25 @@ def test_error_response_400(connection: Connection):
         cursor.execute("SELCT * FROM patients")
 
 
+def test_error_response_422(connection: Connection):
+    """422 responses (Pathling 3.0+ Spark analysis errors) raise ProgrammingError."""
+    error_resp = _make_mock_response(
+        json_data={
+            "resourceType": "OperationOutcome",
+            "issue": [
+                {"severity": "error", "diagnostics": "DATATYPE_MISMATCH: ..."}
+            ],
+        },
+        status_code=422,
+        content_type="application/fhir+json",
+    )
+    connection._session.post.return_value = error_resp
+
+    cursor = connection.cursor()
+    with pytest.raises(ProgrammingError, match="DATATYPE_MISMATCH"):
+        cursor.execute("SELECT TRUE IN (1) AS r")
+
+
 def test_error_response_401(connection: Connection):
     """401 responses raise OperationalError."""
     error_resp = _make_mock_response(
@@ -222,13 +251,17 @@ def test_execute_with_parameters(connection: Connection):
     body = call_args.kwargs.get("json") or call_args[1].get("json")
     params = body["parameter"]
 
-    # queryResource + a single "parameters" wrapper holding all bindings.
-    assert len(params) == 2
-    wrapper = params[1]
+    # subjectResource + one context entry (patients) + a "parameters" wrapper.
+    assert len(params) == 3
+    wrapper = params[-1]
     assert wrapper["name"] == "parameters"
     inner = wrapper["resource"]
     assert inner["resourceType"] == "Parameters"
     assert inner["parameter"] == [{"name": "gender", "valueString": "male"}]
+
+    # The binding must also be declared on the Library, or Pathling rejects it.
+    library = params[0]["resource"]
+    assert library["parameter"] == [{"name": "gender", "use": "in", "type": "string"}]
 
 
 def test_execute_with_typed_parameters(connection: Connection):
@@ -248,12 +281,21 @@ def test_execute_with_typed_parameters(connection: Connection):
     )
 
     body = connection._session.post.call_args.kwargs["json"]
-    inner = body["parameter"][1]["resource"]["parameter"]
+    inner = body["parameter"][-1]["resource"]["parameter"]
     by_name = {p["name"]: p for p in inner}
     assert by_name["active"] == {"name": "active", "valueBoolean": True}
     assert by_name["age"] == {"name": "age", "valueInteger": 42}
     assert by_name["ratio"] == {"name": "ratio", "valueDecimal": 1.5}
     assert by_name["born"] == {"name": "born", "valueDate": "1990-01-02"}
+
+    library = body["parameter"][0]["resource"]
+    declared = {p["name"]: p["type"] for p in library["parameter"]}
+    assert declared == {
+        "active": "boolean",
+        "age": "integer",
+        "ratio": "decimal",
+        "born": "date",
+    }
 
 
 def test_extract_table_names_subquery(connection: Connection):
@@ -278,7 +320,7 @@ def test_extract_table_names_cte(connection: Connection):
 
 
 def _executed_sql(connection: Connection) -> str:
-    """Decode the SQL from the most recent $sqlquery-run POST."""
+    """Decode the SQL from the most recent $sql-run POST."""
     body = connection._session.post.call_args.kwargs.get("json")
     if body is None:
         body = connection._session.post.call_args[1].get("json")

@@ -11,7 +11,7 @@ from superset.db_engine_specs.base import BaseEngineSpec
 
 
 class SqlOnFhirEngineSpec(BaseEngineSpec):
-    """Engine spec for querying FHIR data via $sqlquery-run operation."""
+    """Engine spec for querying FHIR data via $sql-run operation."""
 
     engine = "sqlonfhir"
     engine_name = "SQL on FHIR"
@@ -33,7 +33,7 @@ class SqlOnFhirEngineSpec(BaseEngineSpec):
     # Time grain expressions (Spark SQL syntax — used by e.g. Pathling).
     # Native grains use date_format(date_trunc(...)) — the `from_unixtime(
     # unix_timestamp(...), fmt)` form that Superset's Hive/Spark spec uses
-    # is rejected by Pathling's $sqlquery-run during chart-data introspection
+    # is rejected by Pathling's $sql-run during chart-data introspection
     # (its planner errors on the LIMIT-0 form even though the same SQL runs
     # fine in SQL Lab). Sub-hour buckets keep the unix-arithmetic form
     # wrapped in date_format, which avoids the bare from_unixtime call.

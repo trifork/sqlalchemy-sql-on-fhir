@@ -1,7 +1,7 @@
 # sqlalchemy-sql-on-fhir
 
 SQLAlchemy dialect and Apache Superset engine spec for querying FHIR data via the
-[SQL on FHIR](https://build.fhir.org/ig/FHIR/sql-on-fhir-v2/) `$sqlquery-run` operation.
+[SQL on FHIR](https://build.fhir.org/ig/FHIR/sql-on-fhir-v2/) `$sql-run` operation.
 
 ## Installation
 
