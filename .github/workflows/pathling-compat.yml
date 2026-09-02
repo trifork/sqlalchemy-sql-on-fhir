@@ -10,7 +10,7 @@ name: Pathling compatibility
 #   - `vX.Y.Z`        — the broader Pathling library/CLI (we don't care).
 #   - `server-vX.Y.Z` — the FHIR server we actually integrate against.
 # Only `server-v*` tags are considered. The corresponding GHCR image tag is the
-# numeric tail, e.g. `server-v2.0.0` → ghcr.io/aehrc/pathling:2.0.0.
+# numeric tail, e.g. `server-v3.0.0` → ghcr.io/aehrc/pathling:3.0.0.
 
 on:
   schedule:
@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       image:
-        description: "Full image reference (e.g. ghcr.io/aehrc/pathling:2.0.0). Overrides automatic detection."
+        description: "Full image reference (e.g. ghcr.io/aehrc/pathling:3.0.0). Overrides automatic detection."
         required: false
         type: string
 
